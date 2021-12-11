@@ -1,38 +1,85 @@
 import './style.css';
-import {Map, View} from 'ol';
-import TileLayer from 'ol/layer/Tile';
-import OSM from 'ol/source/OSM';
-import BingMaps from 'ol/source/BingMaps';
-import XYZ from 'ol/source/XYZ';
+import Feature from 'ol/Feature';
+import Map from 'ol/Map';
+import Point from 'ol/geom/Point';
+import View from 'ol/View';
+import {Circle as CircleStyle, Stroke, Style} from 'ol/style';
+import {OSM, Vector as VectorSource} from 'ol/source';
+import {Tile as TileLayer, Vector as VectorLayer} from 'ol/layer';
+import {easeOut} from 'ol/easing';
+import {fromLonLat} from 'ol/proj';
+import {getVectorContext} from 'ol/render';
+import {unByKey} from 'ol/Observable';
 
-const styles = [
-  'RoadOnDemand',
-  'Aerial', // 航测
-  'AerialWithLabelsOnDemand',
-  'CanvasDark',
-  'OrdnanceSurvey',
-];
+const tileLayer = new TileLayer({
+  source: new OSM({
+    wrapX: false,
+  }),
+});
+
+const source = new VectorSource({
+  wrapX: false,
+});
+const vectorLayer = new VectorLayer({
+  source: source,
+});
 
 const map = new Map({
+  layers: [tileLayer, vectorLayer],
   target: 'map',
-  layers: [
-    new TileLayer({
-      // source: new OSM()
-      // source: new BingMaps({
-      //   key: 'AhHjMmNDXvOybkJo0zbkHZyioMSaULrD_BwwV76-ApSSYkdPwYz-TmJ8iCcDBROt',
-      //   imagerySet: styles[2],
-      //   // use maxZoom 19 to see stretched tiles instead of the BingMaps
-      //   // "no photos at this zoom level" tiles
-      //   // maxZoom: 19
-      // 
-      source: new XYZ({
-        // url: 'http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}'
-        url: 'http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}'
-      })
-    }),
-  ],
   view: new View({
-    center: [0, 0],
-    zoom: 2
-  })
+    center: fromLonLat([120.381782,36.087759]),
+    zoom: 14,
+    multiWorld: true,
+  }),
 });
+
+function addRandomFeature() {
+  const x = Math.random() * 360 - 180;
+  const y = Math.random() * 170 - 85;
+  const geom = new Point(fromLonLat([x, y]));
+  const feature = new Feature(geom);
+  source.addFeature(feature);
+}
+
+const duration = 3000;
+function flash(feature) {
+  const start = Date.now();
+  const flashGeom = feature.getGeometry().clone();
+  const listenerKey = tileLayer.on('postrender', animate);
+
+  function animate(event) {
+    const frameState = event.frameState;
+    const elapsed = frameState.time - start;
+    if (elapsed >= duration) {
+      unByKey(listenerKey);
+      return;
+    }
+    const vectorContext = getVectorContext(event);
+    const elapsedRatio = elapsed / duration;
+    // radius will be 5 at start and 30 at end.
+    const radius = easeOut(elapsedRatio)*5 + 10;
+    const opacity = easeOut(1 - elapsedRatio);
+
+    const style = new Style({
+      image: new CircleStyle({
+        radius: radius,
+        stroke: new Stroke({
+          color: 'rgba(0, 200, 0, ' + opacity + ')',
+          width: 0.25 + opacity,
+        }),
+      }),
+    });
+
+    vectorContext.setStyle(style);
+    vectorContext.drawGeometry(flashGeom);
+    // tell OpenLayers to continue postrender animation
+    map.render();
+  }
+}
+
+source.on('addfeature', function (e) {
+  flash(e.feature);
+});
+
+window.setInterval(addRandomFeature, 1000);
